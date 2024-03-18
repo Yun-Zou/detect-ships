@@ -4,19 +4,46 @@
 using namespace cv;
 using namespace std;
 
-double find_horizon(Mat image, bool showImage) {
+struct LineCounter {
+  float gradient;
+  float constant;
+  int pixel_count;
+};
+
+// vector<LineCounter> count_lines(vector<Vec4i> lines) {
+
+//     vector<LineCounter> lineCount;
+//     LineCounter 
+//     if (lines.size() < 1)
+//   // Iterate over lines to find most likely candidate for horizon
+//   for (size_t i = 0; i < lines.size(); i++) {
+//     line(gray_image, Point(lines[i][0], lines[i][1]),
+//          Point(lines[i][2], lines[i][3]), Scalar(0, 0, 255), 3, 8);
+//   }
+//     return vector<LineCounter>
+// } 
+
+/**
+ * @brief Use Otsu thresholding to seperate foreground/background to find horizon. 
+ * Then use edge detection and line detection to find the horizon. 
+ * Otsu was chosen since it can account for more colours of the sky as well as ignore the edges that would exist in the ocean.
+ * 
+ * @param image Image to detect horizon in
+ * @param showImage Show the intermediate image steps
+ * @return double Angle of horizon detected in degrees
+ */
+pair<double,double> find_horizon(Mat image, bool showImage) {
 
     Mat gray_image;
     Mat blur_image;
     Mat threshold_image;
-
-    Size kernal_size = Size(15,15);
+    Mat edge_image;
     
     // Grayscale image
     cvtColor(image, gray_image, cv::COLOR_RGB2GRAY );
     
     // Apply blur to image
-    GaussianBlur(gray_image, blur_image, kernal_size, 0);
+    medianBlur(gray_image, blur_image, 15);
 
     if (showImage) {
         imshow("Blurred Grayscale Image", blur_image);
@@ -26,19 +53,48 @@ double find_horizon(Mat image, bool showImage) {
     // Threshold image with otsu thresholding
     threshold(blur_image, threshold_image, 0, 255, cv::THRESH_BINARY | cv::THRESH_OTSU);
 
-    // Canny(blur_image, threshold_image, 20, 80, 3);
-    // morphologyEx(threshold_image, edge_image, cv::MORPH_GRADIENT,)
+    // Show thresholded image
     if (showImage) {
-        imshow("Thresholded Image", threshold_image);
-        waitKey(0);
+      imshow("Thresholded Image", threshold_image);
+      waitKey(0);
     }
 
-    //  morphologyEx(threshold_image, threshold_image, cv::MORPH_GRADIENT, kernel_size)
-    // imshow("Threshold image", threshold_image);
+    // Perform edge detection
+    Canny(threshold_image, edge_image, 20, 80, 3);
 
-    return 5.0;
+    if (showImage) {
+      imshow("Edge Image", edge_image);
+      waitKey(0);
+    }
+
+    // Find straight lines in image using Probabilistic Hough Lines
+    vector<Vec4i> lines;
+    HoughLinesP(edge_image, lines, 5, CV_PI / 180, 80, 30, 1);
+
+
+    // Iterate over lines to find most likely candidate for horizon
+    for (size_t i = 0; i < lines.size(); i++) {
+      line(gray_image, Point(lines[i][0], lines[i][1]),
+           Point(lines[i][2], lines[i][3]), Scalar(0, 0, 255), 3, 8);
+    }
+
+    if (showImage) {
+      imshow("Thresholded Image", gray_image);
+      waitKey(0);
+    }
+    
+    pair<double, double> results = pair(-1.0, 85);
+    return results;
 }
 
+/**
+ * @brief Rotate image and crop to get rid of blank pixels. Assumes image is w > h for simplicity
+ * 
+ * @param image Image to rotate
+ * @param angle Angle in degrees. Follows right hand rule
+ * @param showImage Show intermediate steps for rotation
+ * @return Mat Rotated and cropped image.
+ */
 Mat rotate_image(Mat image, double angle, bool showImage) {
     
     // Find new image size
@@ -73,23 +129,28 @@ Mat rotate_image(Mat image, double angle, bool showImage) {
     // Determine bounding rectangle, center not relevant
     Point2f vertices[4];
     Point2f rotatedCenter(newImageSize.width / 2.0, newImageSize.height / 2.0);
+    
     RotatedRect rotatedDimension = RotatedRect(rotatedCenter, image.size(), angle);
     rotatedDimension.points(vertices);
 
-    // Find cropped dimensions
-    int croppedUpperX, croppedUpperY, croppedLowerX, croppedLowerY;
+    // Assume w > h image. Find cropped dimensions
+    int croppedLowerX, croppedLowerY, croppedUpperX, croppedUpperY;
 
-   // Draw the rotated rectangle
-    for (int i = 0; i < 4; i++) {
-        
-        std::cout << vertices[i].x << " " << vertices[i].y << endl;
+    if (angle > 0) {
+      croppedLowerX = min(vertices[1].x, vertices[2].x);
+      croppedLowerY = max(vertices[1].y, vertices[2].y);
+      croppedUpperX = max(vertices[0].x, vertices[3].x);
+      croppedUpperY = min(vertices[0].y, vertices[3].y);
+    } else {
+      croppedUpperX = min(vertices[2].x, vertices[3].x);
+      croppedUpperY = max(vertices[2].y, vertices[3].y);
+      croppedLowerX = max(vertices[0].x, vertices[1].x);
+      croppedLowerY = min(vertices[0].y, vertices[1].y);
     }
-    // Size2f uprightSize(boundingBox.width, boundingBox.height);
-    // std::cout << boundingBox.width << " " << boundingBox.height << endl;
-    // rectangle(rotatedImage, boundingBox, cv::Scalar(0,255,0));
-    
+
     // Crop image to new dimensions
-    Mat croppedImage = rotatedImage( Range(105, 446), Range(79, 598));
+    Mat croppedImage = rotatedImage(Range(croppedLowerY, croppedUpperY),
+                                    Range(croppedLowerX, croppedUpperX));
 
     // Display the cropped rotated image
     if (showImage) {
@@ -101,31 +162,44 @@ Mat rotate_image(Mat image, double angle, bool showImage) {
 
 }
 
-void detect_ships(Mat image) {
+void detect_ships(Mat image, int horizon_height) {
     Mat cropped_image;
     Mat gray_image;
-    Mat blur_image;
+    Mat threshold_image;
     Mat edge_image;
 
-    Size kernal_size = Size(5,5);
+    Size kernal_size = Size(3,3);
 
     // Crop image to above horizon
-    cropped_image = image( Range(0, 85), Range(0, image.cols - 1));
-    // imshow("Cropped Image", cropped_image);
-    
+    cropped_image = image( Range(0, horizon_height), Range(0, image.cols - 1));
+    imshow("Cropped Image", cropped_image);
+
     // Grayscale image
     cvtColor(cropped_image, gray_image, cv::COLOR_RGB2GRAY );
-    
-    // Apply blur to image
-    GaussianBlur(gray_image, blur_image, kernal_size, 0);
+    adaptiveThreshold(gray_image, threshold_image, 255, cv::ADAPTIVE_THRESH_MEAN_C,
+                      cv::THRESH_BINARY, 15, 10);
+    // // Apply blur to image
+    // GaussianBlur(gray_image, blur_image, kernal_size, 0);
+    imshow("Thresholded Image", threshold_image);
 
-    imshow("Blurred Image", blur_image);
+    Canny(threshold_image, edge_image, 10, 100, 3);
+    Mat kernel = getStructuringElement(1, Size(3,3));
+    morphologyEx(edge_image, edge_image, cv::MORPH_CLOSE, kernel);
 
-    Canny(blur_image, edge_image, 10, 100, 3);
-
-    imshow("Thresholded Image", edge_image);
+    imshow("Edge Image", edge_image);
     waitKey(0);
 
+    vector<vector<Point>> contours;
+    findContours(edge_image, contours, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE, Point(0, cropped_image.rows - horizon_height ));
+    drawContours(image, contours, -1, Scalar(0, 0, 255), 1);
+
+    for (size_t i = 0; i < contours.size(); i++) {
+      Rect boundingBox = cv::boundingRect(contours[i]);
+      rectangle(image, boundingBox, Scalar(0,255,0), 1);
+    } 
+
+    imshow("Edge Image", image);
+    waitKey(0);
 }
 
 bool showHorizonImages = false;
@@ -147,12 +221,13 @@ int main(int argc, char** argv)
     imshow("Original Image", image);
     waitKey(0);
 
+    pair<double, double> horizon_results = find_horizon(image, showHorizonImages);
 
-    double angle = find_horizon(image, showHorizonImages);
+    Mat rotatedImage = rotate_image(image, horizon_results.first, showRotateImages);
+    // imshow("Rotated Image", rotatedImage);
+    waitKey(0);
 
-    // Mat rotatedImage = rotate_image(image, angle, showRotateImages);
-
-    detect_ships(image);
+    detect_ships(rotatedImage, 75);
 
     return 0;
 }
