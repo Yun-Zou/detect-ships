@@ -29,7 +29,7 @@ pair<double,double> findBestFitLine(const vector<Vec4i> &lines) {
     return result;
 }
 
-pair<double,double> find_horizon(Mat &image, bool showImage) {
+pair<double,double> findHorizon(Mat &image, bool showImage) {
 
     Mat gray_image;
     Mat blur_image;
@@ -93,7 +93,7 @@ pair<double,double> find_horizon(Mat &image, bool showImage) {
  * @param showImage Show intermediate steps for rotation
  * @return Mat Rotated and cropped image.
  */
-Mat rotate_image(Mat &image, double angle, bool showImage) {
+Mat rotateImage(Mat &image, double angle, bool showImage) {
     
     // Find new image size
     Point2f center(image.cols / 2.0, image.rows / 2.0);
@@ -161,7 +161,7 @@ Mat rotate_image(Mat &image, double angle, bool showImage) {
 }
 
 
-void detect_ships(Mat &image, int horizon_height, bool showImage) {
+void detectShips(Mat &image, int horizon_height, bool showImage) {
     Mat cropped_image;
     Mat gray_image;
     Mat threshold_image;
@@ -246,13 +246,13 @@ int main(int argc, char** argv)
     waitKey(0);
 
     // Find angle and height of horizon
-    pair<double, double> horizon_results = find_horizon(image, showHorizonImages);
+    pair<double, double> horizon_results = findHorizon(image, showHorizonImages);
 
     // Rotate image and crop
-    Mat rotatedImage = rotate_image(image, horizon_results.first, showRotateImages);
+    Mat rotatedImage = rotateImage(image, horizon_results.first, showRotateImages);
 
     // Detect ships and place bounding boxes
-    detect_ships(rotatedImage, horizon_results.second, showShipImages);
+    detectShips(rotatedImage, horizon_results.second, showShipImages);
     imshow("Final Image", rotatedImage);
     waitKey(0);
 

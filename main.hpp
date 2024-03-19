@@ -23,7 +23,7 @@ pair<double,double> findBestFitLine(const vector<Vec4i> &lines);
  * @param showImage Show the intermediate image steps
  * @return double Angle of horizon detected in degrees
  */
-pair<double,double> find_horizon(Mat &image, bool showImage);
+pair<double,double> findHorizon(Mat &image, bool showImage);
 
 /**
  * @brief Rotate image by multipling by rotation matrix and crop to get rid of blank pixels.
@@ -34,7 +34,7 @@ pair<double,double> find_horizon(Mat &image, bool showImage);
  * @param showImage Show intermediate steps for rotation
  * @return Mat Rotated and cropped image.
  */
-Mat rotate_image(Mat &image, double angle, bool showImage);
+Mat rotateImage(Mat &image, double angle, bool showImage);
 
 
 /**
@@ -53,4 +53,4 @@ Mat rotate_image(Mat &image, double angle, bool showImage);
  * @param showImage Show intermediate steps
  * @return
  */
-void detect_ships(Mat &image, int horizon_height, bool showImage);
+void detectShips(Mat &image, int horizon_height, bool showImage);
