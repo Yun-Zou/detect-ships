@@ -1,38 +1,35 @@
-#include <opencv2/opencv.hpp>
-#include <iostream>
+#include "main.hpp"
 
-using namespace cv;
-using namespace std;
+pair<double,double> findBestFitLine(const vector<Vec4i> &lines) {
 
-struct LineCounter {
-  float gradient;
-  float constant;
-  int pixel_count;
-};
+    double sumIntercept = 0.0;
+    double sumSlope = 0.0;
+    double leftMostX = lines[0][2];
+    double leftMostY;
+    double rightMostX = 0.0;
+    double rightMostY;
 
-// vector<LineCounter> count_lines(vector<Vec4i> lines) {
+    for (auto line : lines) {
+      sumIntercept += ((line[1] + line[3]) / 2.0);
 
-//     vector<LineCounter> lineCount;
-//     LineCounter 
-//     if (lines.size() < 1)
-//   // Iterate over lines to find most likely candidate for horizon
-//   for (size_t i = 0; i < lines.size(); i++) {
-//     line(gray_image, Point(lines[i][0], lines[i][1]),
-//          Point(lines[i][2], lines[i][3]), Scalar(0, 0, 255), 3, 8);
-//   }
-//     return vector<LineCounter>
-// } 
+      if (line[3] < leftMostX) {
+        leftMostX = line[0];
+        leftMostY = line[1];
+      }
+      if (line[2] > rightMostX) {
+        rightMostX = line[2];
+        rightMostY = line[3];
+      }
+    }   
 
-/**
- * @brief Use Otsu thresholding to seperate foreground/background to find horizon. 
- * Then use edge detection and line detection to find the horizon. 
- * Otsu was chosen since it can account for more colours of the sky as well as ignore the edges that would exist in the ocean.
- * 
- * @param image Image to detect horizon in
- * @param showImage Show the intermediate image steps
- * @return double Angle of horizon detected in degrees
- */
-pair<double,double> find_horizon(Mat image, bool showImage) {
+    double averageSlope = 180 / CV_PI * atan((rightMostY - leftMostY) / (rightMostX - leftMostX));
+    double averageIntercept = sumIntercept / lines.size();
+
+    pair<double,double> result = make_pair(averageSlope, averageIntercept);
+    return result;
+}
+
+pair<double,double> find_horizon(Mat &image, bool showImage) {
 
     Mat gray_image;
     Mat blur_image;
@@ -69,7 +66,7 @@ pair<double,double> find_horizon(Mat image, bool showImage) {
 
     // Find straight lines in image using Probabilistic Hough Lines
     vector<Vec4i> lines;
-    HoughLinesP(edge_image, lines, 5, CV_PI / 180, 80, 30, 1);
+    HoughLinesP(edge_image, lines, 5, CV_PI / 180, 80, 30, 2);
 
 
     // Iterate over lines to find most likely candidate for horizon
@@ -83,7 +80,8 @@ pair<double,double> find_horizon(Mat image, bool showImage) {
       waitKey(0);
     }
     
-    pair<double, double> results = pair(-1.0, 85);
+    // Fit a line to the lines we detected
+    pair<double,double> results = findBestFitLine(lines);
     return results;
 }
 
@@ -95,7 +93,7 @@ pair<double,double> find_horizon(Mat image, bool showImage) {
  * @param showImage Show intermediate steps for rotation
  * @return Mat Rotated and cropped image.
  */
-Mat rotate_image(Mat image, double angle, bool showImage) {
+Mat rotate_image(Mat &image, double angle, bool showImage) {
     
     // Find new image size
     Point2f center(image.cols / 2.0, image.rows / 2.0);
@@ -162,48 +160,74 @@ Mat rotate_image(Mat image, double angle, bool showImage) {
 
 }
 
-void detect_ships(Mat image, int horizon_height) {
+
+void detect_ships(Mat &image, int horizon_height, bool showImage) {
     Mat cropped_image;
     Mat gray_image;
     Mat threshold_image;
     Mat edge_image;
 
-    Size kernal_size = Size(3,3);
-
     // Crop image to above horizon
-    cropped_image = image( Range(0, horizon_height), Range(0, image.cols - 1));
-    imshow("Cropped Image", cropped_image);
+    cropped_image = image( Range(0, horizon_height + 3), Range(0, image.cols - 1));
+
+    if (showImage) {
+      imshow("Cropped Image", cropped_image);
+      waitKey(0);
+    }
 
     // Grayscale image
     cvtColor(cropped_image, gray_image, cv::COLOR_RGB2GRAY );
+
+    // Apply adative thresholding
     adaptiveThreshold(gray_image, threshold_image, 255, cv::ADAPTIVE_THRESH_MEAN_C,
                       cv::THRESH_BINARY, 15, 10);
-    // // Apply blur to image
-    // GaussianBlur(gray_image, blur_image, kernal_size, 0);
-    imshow("Thresholded Image", threshold_image);
 
-    Canny(threshold_image, edge_image, 10, 100, 3);
+    // Apply blur to image
+    // Size kernal_size = Size(3,3);
+    // GaussianBlur(threshold_image, threshold_image, kernal_size, 0);
+
+    if (showImage) {
+      imshow("Thresholded Image", threshold_image);
+      waitKey(0);
+    }
+
+    // Apply Canny Thresholding to Image
+    Canny(threshold_image, edge_image, 5, 40, 3);
+
+    // Apply Closing Morphological Operation to remove small holes
     Mat kernel = getStructuringElement(1, Size(3,3));
     morphologyEx(edge_image, edge_image, cv::MORPH_CLOSE, kernel);
 
-    imshow("Edge Image", edge_image);
-    waitKey(0);
+    if (showImage) {
+      imshow("Edge Image", edge_image);
+      waitKey(0);
+    }
 
     vector<vector<Point>> contours;
-    findContours(edge_image, contours, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE, Point(0, cropped_image.rows - horizon_height ));
-    drawContours(image, contours, -1, Scalar(0, 0, 255), 1);
+    findContours(edge_image, contours, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE, Point(0, cropped_image.rows - horizon_height - 3 ));
+    // drawContours(image, contours, -1, Scalar(0, 0, 255), 1);
 
+    // Iterate over contours to draw boxes
     for (size_t i = 0; i < contours.size(); i++) {
-      Rect boundingBox = cv::boundingRect(contours[i]);
-      rectangle(image, boundingBox, Scalar(0,255,0), 1);
+
+      // Remove contour areas which are too small
+      if (contourArea(contours[i]) < 30) {
+        continue;
+      }
+
+      // Output bounding boxes if they're not impossibly close to ocean
+      // If too many overlapping detections are found, implement non-maximal suppresion
+      if (contours[i][0].y < horizon_height - 5) {
+        Rect boundingBox = cv::boundingRect(contours[i]);
+        rectangle(image, boundingBox, Scalar(0,255,0), 1);
+      }
     } 
 
-    imshow("Edge Image", image);
-    waitKey(0);
 }
 
 bool showHorizonImages = false;
 bool showRotateImages = false;
+bool showShipImages = false;
 
 int main(int argc, char** argv)
 {
@@ -221,14 +245,19 @@ int main(int argc, char** argv)
     imshow("Original Image", image);
     waitKey(0);
 
+    // Find angle and height of horizon
     pair<double, double> horizon_results = find_horizon(image, showHorizonImages);
 
+    // Rotate image and crop
     Mat rotatedImage = rotate_image(image, horizon_results.first, showRotateImages);
-    // imshow("Rotated Image", rotatedImage);
+
+    // Detect ships and place bounding boxes
+    detect_ships(rotatedImage, horizon_results.second, showShipImages);
+    imshow("Final Image", rotatedImage);
     waitKey(0);
 
-    detect_ships(rotatedImage, 75);
-
+    // Write image to folder
+    imwrite("./three_ships_boxed.TIFF", rotatedImage);
     return 0;
 }
 

@@ -1,1 +1,1 @@
-sudo apt-get install -y libopencv-dev
+sudo apt install -y cmake g++ libopencv-dev
